@@ -1,0 +1,34 @@
+import {W,H,pad,terrain,createState,advance,LIMIT_X,LIMIT_Y} from './physics.js';
+import {JetAudio} from './sound.js';
+const $=id=>document.getElementById(id),canvas=$('scene'),ctx=canvas.getContext('2d');
+$('browser-hint').hidden=true;
+const art={};for(const [key,file]of Object.entries({sky:'sky',ship:'lander',terrain:'terrain'})){art[key]=new Image();art[key].src=`art/${file}.png`;}
+let state=createState(),particles=[],last=performance.now(),accumulator=0,endedAt=0,muted=true;
+const audio=new JetAudio();
+const keyboard=new Set(),touch=new Map(),keys=new Set();
+function syncKeys(){keys.clear();for(const k of keyboard)keys.add(k);for(const k of touch.values())keys.add(k);document.querySelectorAll('[data-key]').forEach(b=>b.classList.toggle('active',keys.has(b.dataset.key)));audio.thrust(state.status==='running'&&!muted?keys.size:0);}
+function clearKeys(){keyboard.clear();touch.clear();syncKeys();}
+function showOverlay(title,detail,button){$('message').innerHTML=title;$('detail').textContent=detail;$('start').textContent=button;$('overlay').hidden=false;$('announcement').textContent=detail;}
+function start(){clearKeys();if(state.status!=='paused'){state=createState();particles=[];}state.status='running';$('overlay').hidden=true;$('tip').hidden=false;endedAt=0;accumulator=0;last=performance.now();$('pause').disabled=false;$('pause-label').textContent='Pause';audio.resume();canvas.focus();}
+function reset(){state=createState();start();}
+function pause(){if(state.status==='running'){state.status='paused';clearKeys();$('tip').hidden=true;$('pause-label').textContent='Weiter';showOverlay('Mission pausiert.','Atme durch. Dein Flug wartet auf dich.','Weiterfliegen');}else if(state.status==='paused')start();}
+$('start').onclick=start;$('restart').onclick=reset;$('pause').onclick=pause;$('sound').onclick=async()=>{const button=$('sound');button.disabled=true;const enabled=await audio.setEnabled(muted);muted=!audio.enabled;button.setAttribute('aria-pressed',String(!muted));$('sound-label').textContent=enabled?(muted?'Sound aus':'Sound an'):'Sound nicht verfügbar';button.disabled=false;syncKeys();};
+window.addEventListener('keydown',e=>{if(e.key.startsWith('Arrow')){e.preventDefault();if(state.status==='running'){keyboard.add(e.key);syncKeys();}}else if(!e.repeat){if(e.key==='Escape'||e.key.toLowerCase()==='p')pause();if(e.key.toLowerCase()==='r')reset();}});
+window.addEventListener('keyup',e=>{keyboard.delete(e.key);syncKeys();});
+window.addEventListener('blur',()=>{clearKeys();if(state.status==='running')pause();});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.status==='running')pause();});
+for(const b of document.querySelectorAll('[data-key]')){b.addEventListener('pointerdown',e=>{e.preventDefault();if(state.status==='running'){b.setPointerCapture(e.pointerId);touch.set(e.pointerId,b.dataset.key);syncKeys();}});const release=e=>{touch.delete(e.pointerId);syncKeys();};b.addEventListener('pointerup',release);b.addEventListener('pointercancel',release);b.addEventListener('lostpointercapture',release);b.addEventListener('contextmenu',e=>e.preventDefault());}
+function explode(){for(let i=0;i<95;i++){const a=Math.random()*Math.PI*2,v=35+Math.random()*180;particles.push({x:state.x,y:state.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:1+Math.random(),color:i%3?'#ff9855':'#f8ebad'});}audio.result(false);}
+function finish(){clearKeys();endedAt=performance.now();$('tip').hidden=true;$('pause').disabled=true;if(state.status==='crashed'){explode();$('announcement').textContent=state.reason;}else{audio.result(true);showOverlay('Sanft gelandet.','Mission erfüllt! Restzeit: '+Math.ceil(state.time)+' Sekunden.','Noch einmal fliegen');}}
+function flame(x,y,dx,dy){ctx.save();ctx.translate(x,y);ctx.rotate(Math.atan2(dy,dx));const len=15+Math.random()*12;ctx.fillStyle='#ff9443';ctx.beginPath();ctx.moveTo(0,-4);ctx.lineTo(len,0);ctx.lineTo(0,4);ctx.fill();ctx.fillStyle='#ffeab1';ctx.beginPath();ctx.moveTo(0,-2);ctx.lineTo(len*.55,0);ctx.lineTo(0,2);ctx.fill();ctx.restore();}
+function draw(dt){ctx.clearRect(0,0,W,H);if(art.sky.complete&&art.sky.naturalWidth)ctx.drawImage(art.sky,0,0,W,H);
+ctx.save();ctx.beginPath();ctx.moveTo(0,H);for(const [x,y]of terrain)ctx.lineTo(x,y);ctx.lineTo(W,H);ctx.closePath();ctx.clip();if(art.terrain.complete&&art.terrain.naturalWidth)ctx.drawImage(art.terrain,0,270,W,230);ctx.fillStyle='#07142155';ctx.fillRect(0,270,W,230);ctx.restore();
+ctx.beginPath();terrain.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.strokeStyle='#849ba9';ctx.lineWidth=1;ctx.stroke();
+ctx.save();ctx.strokeStyle='#b4e745';ctx.fillStyle='#b4e745';ctx.shadowColor='#b4e745';ctx.shadowBlur=12;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(pad.left,pad.y-16);ctx.lineTo(pad.left,pad.y);ctx.lineTo(pad.right,pad.y);ctx.lineTo(pad.right,pad.y-16);ctx.stroke();ctx.shadowBlur=0;ctx.font='12px Mono,monospace';ctx.textAlign='center';ctx.fillText('LANDEZONE',(pad.left+pad.right)/2,pad.y+23);ctx.restore();
+if(state.status!=='crashed'){if(state.status==='running'){if(keys.has('ArrowUp'))flame(state.x,state.y+15,0,1);if(keys.has('ArrowDown'))flame(state.x,state.y-14,0,-1);if(keys.has('ArrowRight'))flame(state.x-12,state.y,-1,0);if(keys.has('ArrowLeft'))flame(state.x+12,state.y,1,0);}if(art.ship.complete&&art.ship.naturalWidth)ctx.drawImage(art.ship,state.x-22,state.y-24,44,48);}
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=30*dt;ctx.globalAlpha=Math.max(0,Math.min(1,p.life));ctx.fillStyle=p.color;if(!reduced)ctx.fillRect(p.x,p.y,3,3);}ctx.globalAlpha=1;particles=particles.filter(p=>p.life>0);
+if(state.status==='crashed'&&endedAt&&performance.now()-endedAt>650&&$('overlay').hidden)showOverlay('Mission gescheitert.',state.reason,'Erneut versuchen');
+$('time').textContent='00:'+String(Math.ceil(state.time)).padStart(2,'0');if(state.time===75)$('time').textContent='01:15';else if(state.time>60)$('time').textContent='01:'+String(Math.ceil(state.time)-60).padStart(2,'0');
+$('time').classList.toggle('danger',state.time<15);$('vx').textContent=(state.vx/8).toFixed(1)+' m/s';$('vy').textContent=(state.vy/8).toFixed(1)+' m/s';$('vx').classList.toggle('danger',Math.abs(state.vx)>LIMIT_X);$('vy').classList.toggle('danger',Math.abs(state.vy)>LIMIT_Y);if(state.status==='running'&&state.time<68)$('tip').hidden=true;
+
+}
+function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;if(state.status==='running'){accumulator+=dt;while(accumulator>=1/120&&state.status==='running'){advance(state,keys,1/120);accumulator-=1/120;if(state.status!=='running')finish();}}draw(dt);requestAnimationFrame(frame);}requestAnimationFrame(frame);
