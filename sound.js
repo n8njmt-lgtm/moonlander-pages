@@ -28,6 +28,24 @@ export class JetAudio {
     this.jetGain=ctx.createGain();this.jetGain.gain.value=0;
     this.jet.connect(high).connect(low).connect(this.jetGain).connect(this.master);this.jet.start();
   }
+  async setMusic(enabled){
+    this.musicEnabled=enabled;
+    if(enabled){try{if(!this.context)this.initialize();await this.context.resume();if(this.context.state!=='running')throw new Error('Audio unavailable');if(!this.musicGain)this.initializeMusic();}catch{this.musicEnabled=false;return false;}}
+    this.music(this.musicPlaying);return true;
+  }
+  initializeMusic(){
+    const ctx=this.context;this.musicGain=ctx.createGain();this.musicGain.gain.value=0;
+    const filter=ctx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=650;
+    this.musicGain.connect(filter).connect(ctx.destination);
+    // Quiet, slow-moving minor-chord pads; separate from the pneumatic jet sound.
+    for(const [i,hz]of [110,164.81,220,261.63].entries()){
+      const osc=ctx.createOscillator(),gain=ctx.createGain(),lfo=ctx.createOscillator(),depth=ctx.createGain();
+      osc.type='sine';osc.frequency.value=hz;osc.detune.value=i%2?4:-4;gain.gain.value=.17;
+      lfo.frequency.value=.045+i*.013;depth.gain.value=.065;lfo.connect(depth).connect(gain.gain);
+      osc.connect(gain).connect(this.musicGain);osc.start();lfo.start();
+    }
+  }
+  music(playing){this.musicPlaying=Boolean(playing);if(this.musicGain)this.musicGain.gain.setTargetAtTime(this.musicEnabled&&playing?.12:0,this.context.currentTime,.25);}
   thrust(count){
     count=this.enabled?Math.min(4,count):0;
     if(count===this.activeJets)return;
